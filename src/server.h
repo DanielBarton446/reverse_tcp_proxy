@@ -1,6 +1,7 @@
 #pragma once
 
 #include "event.h"
+#include <sys/fcntl.h>
 
 typedef struct TCPServer {
     // we want the TCPServer to 
@@ -13,4 +14,11 @@ typedef struct TCPServer {
 TCPServer* tcp_server_init(uint16_t port);
 void tcp_server_start(TCPServer* server);
 void tcp_server_stop(TCPServer* server);
+void accept_client(TCPServer* server);
 
+
+inline int set_non_blocking(int fd) {
+    int current_flags = fcntl(fd, F_GETFL);
+    int ret = fcntl(fd, F_SETFL, current_flags | O_NONBLOCK);
+    return ret;
+}

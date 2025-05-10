@@ -12,7 +12,7 @@ TCPServer* tcp_server_init(uint16_t port) {
     TCPServer* server = (TCPServer*) malloc(sizeof(TCPServer));
 
     server->port = port;
-    server->event.fd = 0;
+    server->event.fd = -1;
     server->event.type = SERVER_EVENT;
 
     return server;
@@ -20,18 +20,19 @@ TCPServer* tcp_server_init(uint16_t port) {
 
 
 void tcp_server_start(TCPServer* server) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, NULL);
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
-        perror("Failed to create socket for tcp server");
-        perror(errno);
+        perror("Failed to create socket for tcp server\n");
     }
+    server->event.fd = sockfd;
+
+    set_non_blocking(sockfd);
     
     // allow reuse of ip
     int opt = 1;
     int opt_res = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     if (opt_res == -1) {
-        perror("Opt Bruh");
-        perror(errno);
+        perror("Opt issues\n");
     }
 
     struct sockaddr_in sock_info;
@@ -41,16 +42,30 @@ void tcp_server_start(TCPServer* server) {
 
     int bind_res = bind(sockfd, (struct sockaddr *) &sock_info, sizeof(sock_info));
     if (bind_res == -1) {
-        perror("Bind Bruh");
-        perror(errno);
+        perror("Bind issues\n");
     }
 
     int listen_res = listen(sockfd, SOMAXCONN);
-
+    if (listen_res == -1) {
+        perror("Listen issues\n");
+    }
     return;
 }
 
 void tcp_server_stop(TCPServer* server) {
     close(server->event.fd);
     return;
+}
+
+
+void accept_client(TCPServer *server) {
+    struct sockaddr_in client_addr;
+    socklen_t client_addr_size = sizeof(client_addr);
+    int client_fd = accept(server->event.fd, (struct sockaddr *) &client_addr, &client_addr_size);
+    if (client_fd == -1) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+            printf("Failed client accept\n");
+        }
+    }
+    set_non_blocking(client_fd);
 }
