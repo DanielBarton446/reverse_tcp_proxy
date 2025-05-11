@@ -15,7 +15,7 @@
 uint8_t global_id = 0;
 
 static void create_client_backend(EventSystem* es, TCPClient* client);
-static void forward_to_backend(EventSystem* es, TCPClient* client);
+static void sendbuf_backend_copy(EventSystem* es, TCPClient* client);
 
 static void accept_client(EventSystem* es, TCPServer* server);
 static void cleanup_client(EventSystem* es, TCPClient* client);
@@ -44,48 +44,56 @@ void run_worker_process(TCPServer* server) {
             case CLIENT_EVENT:
                 if (events & EPOLLIN) {
                     recv_client(es, (TCPClient*) ev_data);
-                }
-                if (events & EPOLLOUT) {
+
                     send_before_len = ((TCPClient*) ev_data)->send_len;
                     send_before_offset = ((TCPClient*) ev_data)->send_offset;
-                    send_tcp_client(es, (TCPClient*) ev_data); // echo
-                    // reset so we can also forward to backend
-                    ((TCPClient*) ev_data)->send_len = send_before_len;
-                    ((TCPClient*) ev_data)->send_offset = send_before_offset;
-                    forward_to_backend(es, (TCPClient*) ev_data);
+                    // backend EPOLLOUT ready
+                    sendbuf_backend_copy(es, (TCPClient*) ev_data); // prep send buff
+                    send_tcp_client(es, (TCPClient*) ev_data);      // echo
+                }
+                if (events & EPOLLOUT) {
+                    // TODO: from backend send data to client
                 }
                 break;
             case BACKEND_EVENT:
                 if (events & EPOLLIN) {
-                    printf("some backend event\n");
-                    // at this point, forward to backend tcp client
+                    printf("Backend ready to send to client\n");
+                    // at this point, forward to end_client
                 }
                 if (events & EPOLLOUT) {
-                    // we have data to send to backend
-                    // likely created from handling CLIENT_EVENT
+                    // time to send to tcp client again
+                    send_tcp_client(es, (TCPClient*) ev_data);
+                    // Fully flushed, so just check for recv from backend
+                    es_mod(es, ev_data, EPOLLIN);
                 }
+                break;
             }
         }
     }
 }
 
-static void forward_to_backend(EventSystem* es, TCPClient* end_client) {
+static void sendbuf_backend_copy(EventSystem* es, TCPClient* end_client) {
     // Sanity check that the backend pointer exists
     if (end_client->peer == NULL) {
         printf("Backend client not initialized\n");
         return;
     }
+    if (end_client->peer->peer_type != PEER_TYPE_BACKEND) {
+        printf("Peer is not a backend client\n");
+        return;
+    }
+    TCPClient* backend = end_client->peer;
     // need to mem copy from client send buffer to backend send buffer
-    end_client->peer->send_len = end_client->send_len;
-    end_client->peer->send_offset = end_client->send_offset;
-    memcpy(end_client->peer->send_buf, end_client->send_buf, end_client->send_len);
+    // Set backend offsets and len to match
+    backend->send_len = end_client->send_len;
+    backend->send_offset = end_client->send_offset;
+    memcpy(backend->send_buf, end_client->send_buf, end_client->send_len);
 
-    printf("Forwarding data to backend\n");
-    send_tcp_client(es, end_client->peer); 
-
-    // we have sent everything, so reset flags since no more
-    // EPOLLOUT at this moment.
-    es_mod(es, (EventBase*) end_client, EPOLLIN);
+    if (backend->send_offset < backend->send_len) {
+        es_mod(es, (EventBase*) backend, EPOLLIN | EPOLLOUT);
+    } else {
+        es_mod(es, (EventBase*) backend, EPOLLIN); // Clean state
+    }
 }
 
 static void create_client_backend(EventSystem* es, TCPClient* end_client) {
@@ -116,6 +124,7 @@ static void create_client_backend(EventSystem* es, TCPClient* end_client) {
     // make TCPClient for backend
     TCPClient* backend_client = tcp_client_init(++global_id);
     backend_client->peer_type = PEER_TYPE_BACKEND;
+    backend_client->event.type = BACKEND_EVENT;
     backend_client->event.fd = sockfd;
 
     // assocation of the peers
@@ -125,8 +134,6 @@ static void create_client_backend(EventSystem* es, TCPClient* end_client) {
     // Now ADD BACKEND TO EVENT SYSTEM
     // -- not ready for sending from end_client -> backend.
     es_add(es, (EventBase*) backend_client, EPOLLIN);
-
-    // I don't think end client needs to be ready for EPOLLOUT events now.
 
     return;
 }
@@ -174,9 +181,6 @@ static void recv_client(EventSystem* es, TCPClient* client) {
         if (num_bytes > 0) {
             client->send_len = num_bytes;
             client->send_offset = 0;
-
-            es_mod(es, (EventBase*) client, EPOLLIN | EPOLLOUT);
-            // mark ready for epoll out.
         } else if (num_bytes == 0) {
             // EOF from client
             printf("Client %d Disconnected\n", client->id);
@@ -198,10 +202,6 @@ static void send_tcp_client(EventSystem* es, TCPClient* client) {
     while (client->send_offset < client->send_len) {
         ssize_t n = send(client->event.fd, client->send_buf + client->send_offset,
                          client->send_len - client->send_offset, 0);
-        // we might have to do some validations here on
-        // number of bytes sent vs buffer size.
-        // I think we need to fully flush the buffer
-        // so we dont end up with recv overwriting before sending.
 
         if (n == -1) {
             perror("we failed to send for some reason\n");
@@ -215,7 +215,6 @@ static void send_tcp_client(EventSystem* es, TCPClient* client) {
     // we have flushed buffer best we can
     client->send_len = 0;
     client->send_offset = 0;
-
 
     return;
 }
