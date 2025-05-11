@@ -7,6 +7,7 @@
 int main(int argc, char* argv[]) {
 
     TCPServer* server = tcp_server_init(12345);
+    // need information for the backend service.
 
     tcp_server_start(server);
     printf("Server started on port %d\n", server->port);

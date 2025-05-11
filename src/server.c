@@ -28,8 +28,7 @@ void tcp_server_start(TCPServer* server) {
 
     // allow reuse of ip
     int opt = 1;
-    int opt_res =
-        setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    int opt_res = setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
     if (opt_res == -1) {
         perror("Opt issues\n");
     }
@@ -39,8 +38,7 @@ void tcp_server_start(TCPServer* server) {
     sock_info.sin_addr.s_addr = INADDR_ANY;
     sock_info.sin_port = htons(server->port);
 
-    int bind_res =
-        bind(sockfd, (struct sockaddr*) &sock_info, sizeof(sock_info));
+    int bind_res = bind(sockfd, (struct sockaddr*) &sock_info, sizeof(sock_info));
     if (bind_res == -1) {
         perror("Bind issues\n");
     }

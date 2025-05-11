@@ -8,6 +8,7 @@
 typedef enum EventType {
     SERVER_EVENT,
     CLIENT_EVENT,
+    BACKEND_EVENT,
 } EventType;
 
 

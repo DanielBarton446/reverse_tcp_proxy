@@ -14,9 +14,7 @@ int es_add(EventSystem* es, EventBase* data, uint32_t events) {
     return epoll_ctl(es->epoll_fd, EPOLL_CTL_ADD, data->fd, &event);
 }
 
-int es_del(EventSystem* es, int fd) {
-    return epoll_ctl(es->epoll_fd, EPOLL_CTL_DEL, fd, NULL);
-}
+int es_del(EventSystem* es, int fd) { return epoll_ctl(es->epoll_fd, EPOLL_CTL_DEL, fd, NULL); }
 
 int es_wait(EventSystem* es, int timeout) {
     return epoll_wait(es->epoll_fd, es->events, MAX_EVENTS, timeout);
