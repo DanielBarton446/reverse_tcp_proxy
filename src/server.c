@@ -1,7 +1,6 @@
 #include "server.h"
 #include "event.h"
 #include <arpa/inet.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -55,17 +54,4 @@ void tcp_server_start(TCPServer* server) {
 void tcp_server_stop(TCPServer* server) {
     close(server->event.fd);
     return;
-}
-
-
-void accept_client(TCPServer *server) {
-    struct sockaddr_in client_addr;
-    socklen_t client_addr_size = sizeof(client_addr);
-    int client_fd = accept(server->event.fd, (struct sockaddr *) &client_addr, &client_addr_size);
-    if (client_fd == -1) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            printf("Failed client accept\n");
-        }
-    }
-    set_non_blocking(client_fd);
 }

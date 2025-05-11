@@ -23,6 +23,14 @@ int es_wait(EventSystem* es, int timeout) {
     return epoll_wait(es->epoll_fd, es->events, MAX_EVENTS, timeout);
 }
 
+int es_mod(EventSystem* es, EventBase* data, uint32_t events) {
+    struct epoll_event event;
+    event.data.ptr = data;
+    event.events = events;
+
+    return epoll_ctl(es->epoll_fd, EPOLL_CTL_MOD, data->fd, &event);
+}
+
 
 EventSystem* event_system_init() {
     EventSystem* event_system = (EventSystem*) malloc(sizeof(EventSystem));

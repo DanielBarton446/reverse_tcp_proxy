@@ -26,5 +26,6 @@ typedef struct EventSystem {
 EventSystem* event_system_init();
 
 int es_add(EventSystem* es, EventBase* data, uint32_t events);
+int es_mod(EventSystem* es, EventBase* data, uint32_t events);
 int es_del(EventSystem* es, int fd); // unregister fd from interest list
 int es_wait(EventSystem* es, int timeout);
