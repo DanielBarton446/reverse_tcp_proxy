@@ -5,8 +5,7 @@
 #include <string.h>
 #include <sys/epoll.h>
 
-
-int es_add(EventSystem* es, EventBase* data, uint32_t events) { 
+int es_add(EventSystem* es, EventBase* data, uint32_t events) {
     struct epoll_event event;
     // allows us to per-event typecast and do things with events
     event.data.ptr = data;
@@ -30,7 +29,6 @@ int es_mod(EventSystem* es, EventBase* data, uint32_t events) {
 
     return epoll_ctl(es->epoll_fd, EPOLL_CTL_MOD, data->fd, &event);
 }
-
 
 EventSystem* event_system_init() {
     EventSystem* event_system = (EventSystem*) malloc(sizeof(EventSystem));

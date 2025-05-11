@@ -4,9 +4,7 @@
 #include <stdio.h>
 #include <unistd.h>
 
-
-
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
 
     TCPServer* server = tcp_server_init(12345);
 

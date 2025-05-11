@@ -3,10 +3,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-
-
 TCPClient* tcp_client_init(uint8_t id) {
-    TCPClient* client = (TCPClient *) malloc(sizeof(TCPClient));
+    TCPClient* client = (TCPClient*) malloc(sizeof(TCPClient));
     client->event.fd = -1;
     client->event.type = CLIENT_EVENT;
     client->id = id;
