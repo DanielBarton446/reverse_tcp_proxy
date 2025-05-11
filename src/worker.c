@@ -14,22 +14,25 @@
 
 uint8_t global_id = 0;
 
-static void create_client_backend(EventSystem* es, TCPClient* client);
-static void sendbuf_backend_copy(EventSystem* es, TCPClient* client);
-
 static void accept_client(EventSystem* es, TCPServer* server);
 static void cleanup_client(EventSystem* es, TCPClient* client);
-
 static void recv_client(EventSystem* es, TCPClient* client);
 static void send_tcp_client(EventSystem* es, TCPClient* client);
+static void tx_echo(EventSystem* es, TCPClient* client);
+
+static void create_associated_upstream(EventSystem* es, TCPClient* client);
+
+static void tx_upstream_copy(EventSystem* es, TCPClient* client);
+
+static void tx_downstream_copy(EventSystem* es, TCPClient* client);
 
 void run_worker_process(TCPServer* server) {
     EventSystem* es = event_system_init();
 
     // start event loop now
     es_add(es, (EventBase*) server, EPOLLIN);
-    int send_before_len = 0;
-    int send_before_offset = 0;
+    int rx_before_len = 0;
+    int rx_before_offset = 0;
     for (;;) {
         int nfds = es_wait(es, -1);
 
@@ -41,29 +44,26 @@ void run_worker_process(TCPServer* server) {
             case SERVER_EVENT:
                 accept_client(es, (TCPServer*) ev_data);
                 break;
-            case CLIENT_EVENT:
+            case DOWNSTREAM_EVENT:
                 if (events & EPOLLIN) {
                     recv_client(es, (TCPClient*) ev_data);
-
-                    send_before_len = ((TCPClient*) ev_data)->send_len;
-                    send_before_offset = ((TCPClient*) ev_data)->send_offset;
-                    // backend EPOLLOUT ready
-                    sendbuf_backend_copy(es, (TCPClient*) ev_data); // prep send buff
-                    send_tcp_client(es, (TCPClient*) ev_data);      // echo
+                    tx_upstream_copy(es, (TCPClient*) ev_data); // prep send buff
+                    tx_echo(es, (TCPClient*) ev_data);          // echo to client
                 }
                 if (events & EPOLLOUT) {
-                    // TODO: from backend send data to client
+                    send_tcp_client(es, (TCPClient*) ev_data);
+                    // Fully flushed, Strictly check rx from downstream
+                    es_mod(es, ev_data, EPOLLIN);
                 }
                 break;
-            case BACKEND_EVENT:
+            case UPSTREAM_EVENT:
                 if (events & EPOLLIN) {
-                    printf("Backend ready to send to client\n");
-                    // at this point, forward to end_client
+                    recv_client(es, (TCPClient*) ev_data);
+                    tx_downstream_copy(es, (TCPClient*) ev_data); // prep send buff
                 }
                 if (events & EPOLLOUT) {
-                    // time to send to tcp client again
                     send_tcp_client(es, (TCPClient*) ev_data);
-                    // Fully flushed, so just check for recv from backend
+                    // Fully flushed. Strictly check rx from upstream
                     es_mod(es, ev_data, EPOLLIN);
                 }
                 break;
@@ -72,32 +72,74 @@ void run_worker_process(TCPServer* server) {
     }
 }
 
-static void sendbuf_backend_copy(EventSystem* es, TCPClient* end_client) {
-    // Sanity check that the backend pointer exists
-    if (end_client->peer == NULL) {
-        printf("Backend client not initialized\n");
+static void tx_echo(EventSystem* es, TCPClient* client) {
+    // sanity check that client pointer exists
+    if (client == NULL) {
+        printf("Client not initialized\n");
         return;
     }
-    if (end_client->peer->peer_type != PEER_TYPE_BACKEND) {
-        printf("Peer is not a backend client\n");
-        return;
-    }
-    TCPClient* backend = end_client->peer;
-    // need to mem copy from client send buffer to backend send buffer
-    // Set backend offsets and len to match
-    backend->send_len = end_client->send_len;
-    backend->send_offset = end_client->send_offset;
-    memcpy(backend->send_buf, end_client->send_buf, end_client->send_len);
 
-    if (backend->send_offset < backend->send_len) {
-        es_mod(es, (EventBase*) backend, EPOLLIN | EPOLLOUT);
+    // memcopy rx to tx
+    client->tx_len = client->rx_len;
+    client->tx_offset = client->rx_offset;
+    memcpy(client->tx_buf, client->rx_buf, client->rx_len);
+
+    if (client->tx_offset < client->tx_len) {
+        es_mod(es, (EventBase*) client, EPOLLIN | EPOLLOUT);
     } else {
-        es_mod(es, (EventBase*) backend, EPOLLIN); // Clean state
+        es_mod(es, (EventBase*) client, EPOLLIN); // Clean state
     }
 }
 
-static void create_client_backend(EventSystem* es, TCPClient* end_client) {
-    // hard code for now for backend connection
+static void tx_downstream_copy(EventSystem* es, TCPClient* upstream) {
+    // sanity check that downstream pointer exists
+    if (upstream->peer == NULL) {
+        printf("End client not initialized\n");
+        return;
+    }
+    if (upstream->peer->peer_type != PEER_TYPE_DOWNSTREAM) {
+        printf("Peer is not a client\n");
+        return;
+    }
+    TCPClient* downstream = upstream->peer;
+
+    // memcopy from upstream rx to downstream tx
+    downstream->tx_len = upstream->rx_len;
+    downstream->tx_offset = upstream->rx_offset;
+    memcpy(downstream->tx_buf, upstream->rx_buf, upstream->rx_len);
+
+    if (downstream->tx_offset < downstream->tx_len) {
+        es_mod(es, (EventBase*) downstream, EPOLLIN | EPOLLOUT);
+    } else {
+        es_mod(es, (EventBase*) downstream, EPOLLIN); // Clean state
+    }
+}
+
+static void tx_upstream_copy(EventSystem* es, TCPClient* downstream) {
+    // Sanity check that the upstream pointer exists
+    if (downstream->peer == NULL) {
+        printf("Upstream client not initialized\n");
+        return;
+    }
+    if (downstream->peer->peer_type != PEER_TYPE_UPSTREAM) {
+        printf("Peer is not a upstream client\n");
+        return;
+    }
+    TCPClient* upstream = downstream->peer;
+    // memcopy from downstream rx to upstream tx
+    upstream->tx_len = downstream->rx_len;
+    upstream->tx_offset = downstream->rx_offset;
+    memcpy(upstream->tx_buf, downstream->rx_buf, downstream->rx_len);
+
+    if (upstream->tx_offset < upstream->tx_len) {
+        es_mod(es, (EventBase*) upstream, EPOLLIN | EPOLLOUT);
+    } else {
+        es_mod(es, (EventBase*) upstream, EPOLLIN); // Clean state
+    }
+}
+
+static void create_associated_upstream(EventSystem* es, TCPClient* downstream) {
+    // hard code for now for upstream connection
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         perror("Failed to create socket");
@@ -106,34 +148,35 @@ static void create_client_backend(EventSystem* es, TCPClient* end_client) {
 
     set_non_blocking(sockfd);
 
-    struct sockaddr_in backend_addr;
-    int backend_addr_len = sizeof(backend_addr);
-    backend_addr.sin_family = AF_INET;
-    if (inet_pton(AF_INET, "127.0.0.1", &backend_addr.sin_addr) <= 0) {
+    struct sockaddr_in upstream_addr;
+    int upstream_addr_len = sizeof(upstream_addr);
+    upstream_addr.sin_family = AF_INET;
+    if (inet_pton(AF_INET, "127.0.0.1", &upstream_addr.sin_addr) <= 0) {
         perror("Invalid address");
         return;
     }
-    backend_addr.sin_port = htons(8000); // pretend this port is correct
-    //
-    if (connect(sockfd, (struct sockaddr*) &backend_addr, backend_addr_len) == -1) {
+    upstream_addr.sin_port = htons(8000); // pretend this port is correct
+
+    if (connect(sockfd, (struct sockaddr*) &upstream_addr, upstream_addr_len) == -1) {
         if (errno != EINPROGRESS) {
-            perror("Failed to connect to backend");
+            perror("Failed to connect to upstream");
             return;
         }
     }
-    // make TCPClient for backend
-    TCPClient* backend_client = tcp_client_init(++global_id);
-    backend_client->peer_type = PEER_TYPE_BACKEND;
-    backend_client->event.type = BACKEND_EVENT;
-    backend_client->event.fd = sockfd;
+
+    // make TCPClient for upstream
+    TCPClient* upstream = tcp_client_init(++global_id);
+    upstream->peer_type = PEER_TYPE_UPSTREAM;
+    upstream->event.type = UPSTREAM_EVENT;
+    upstream->event.fd = sockfd;
 
     // assocation of the peers
-    backend_client->peer = end_client;
-    end_client->peer = backend_client;
+    upstream->peer = downstream;
+    downstream->peer = upstream;
 
-    // Now ADD BACKEND TO EVENT SYSTEM
-    // -- not ready for sending from end_client -> backend.
-    es_add(es, (EventBase*) backend_client, EPOLLIN);
+    // Now ADD UPSTREAM TO EVENT SYSTEM
+    // -- not ready for sending from downstream -> upstream
+    es_add(es, (EventBase*) upstream, EPOLLIN);
 
     return;
 }
@@ -149,13 +192,13 @@ static void accept_client(EventSystem* es, TCPServer* server) {
     }
     set_non_blocking(client_fd);
     TCPClient* client = tcp_client_init(++global_id);
-    client->peer_type = PEER_TYPE_CLIENT;
+    client->peer_type = PEER_TYPE_DOWNSTREAM;
 
     client->event.fd = client_fd;
 
     es_add(es, (EventBase*) client, EPOLLIN);
 
-    create_client_backend(es, client);
+    create_associated_upstream(es, client);
 
     return;
 }
@@ -176,11 +219,11 @@ static void cleanup_client(EventSystem* es, TCPClient* client) {
 
 static void recv_client(EventSystem* es, TCPClient* client) {
     while (1) {
-        ssize_t num_bytes = recv(client->event.fd, client->send_buf, sizeof(client->send_buf), 0);
+        ssize_t num_bytes = recv(client->event.fd, client->rx_buf, sizeof(client->rx_buf), 0);
 
         if (num_bytes > 0) {
-            client->send_len = num_bytes;
-            client->send_offset = 0;
+            client->rx_len = num_bytes;
+            client->rx_offset = 0;
         } else if (num_bytes == 0) {
             // EOF from client
             printf("Client %d Disconnected\n", client->id);
@@ -199,9 +242,9 @@ static void recv_client(EventSystem* es, TCPClient* client) {
 }
 
 static void send_tcp_client(EventSystem* es, TCPClient* client) {
-    while (client->send_offset < client->send_len) {
-        ssize_t n = send(client->event.fd, client->send_buf + client->send_offset,
-                         client->send_len - client->send_offset, 0);
+    while (client->tx_offset < client->tx_len) {
+        ssize_t n = send(client->event.fd, client->tx_buf + client->tx_offset,
+                         client->tx_len - client->tx_offset, 0);
 
         if (n == -1) {
             perror("we failed to send for some reason\n");
@@ -209,12 +252,12 @@ static void send_tcp_client(EventSystem* es, TCPClient* client) {
         }
         printf("Sent %ld bytes to client %d\n", n, client->id);
 
-        client->send_offset += n;
+        client->tx_offset += n;
     }
 
     // we have flushed buffer best we can
-    client->send_len = 0;
-    client->send_offset = 0;
+    client->tx_len = 0;
+    client->tx_offset = 0;
 
     return;
 }
