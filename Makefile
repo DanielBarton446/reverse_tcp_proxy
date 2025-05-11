@@ -9,6 +9,8 @@ BUILD_DIR = build
 SRC_DIR = src
 
 C_FILES = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/**/*.c)
+H_FILES = $(wildcard $(SRC_DIR)/*.h) $(wildcard $(SRC_DIR)/**/*.h)
+
 OBJ_FILES = $(patsubst %.c, %.o, $(C_FILES))
 
 DEP_FILES = $(patsubst %.c, %.d, $(C_FILES))
@@ -21,7 +23,7 @@ clean:
 	rm -rf $(BUILD_DIR)/$(TARGET) $(OBJ_FILES) $(TEST_BINS) $(DEP_FILES)
 
 format: 
-	clang-format -i $(C_FILES)
+	clang-format -i $(C_FILES) $(H_FILES)
 
 $(BUILD_DIR):
 	mkdir -p $@

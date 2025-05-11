@@ -25,5 +25,4 @@ struct TCPClient {
     size_t rx_offset;
 };
 
-
 TCPClient* tcp_client_init(uint8_t id);

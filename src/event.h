@@ -4,25 +4,21 @@
 
 #define MAX_EVENTS 1024
 
-
 typedef enum EventType {
     SERVER_EVENT,
     DOWNSTREAM_EVENT,
     UPSTREAM_EVENT,
 } EventType;
 
-
 typedef struct EventBase {
     int fd;
     EventType type;
 } EventBase;
 
-
 typedef struct EventSystem {
     int epoll_fd;
     struct epoll_event events[MAX_EVENTS];
 } EventSystem;
-
 
 EventSystem* event_system_init();
 

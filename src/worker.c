@@ -200,7 +200,6 @@ static void accept_client(EventSystem* es, TCPServer* server) {
 
     es_add(es, (EventBase*) client, EPOLLIN);
 
-
     return;
 }
 
