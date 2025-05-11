@@ -155,7 +155,7 @@ static void create_associated_upstream(EventSystem* es, TCPClient* downstream) {
         perror("Invalid address");
         return;
     }
-    upstream_addr.sin_port = htons(8000); // pretend this port is correct
+    upstream_addr.sin_port = htons(6479); // pretend this port is correct
 
     if (connect(sockfd, (struct sockaddr*) &upstream_addr, upstream_addr_len) == -1) {
         if (errno != EINPROGRESS) {
