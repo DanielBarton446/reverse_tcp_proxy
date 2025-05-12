@@ -48,7 +48,7 @@ void run_worker_process(TCPServer* server) {
                 if (events & EPOLLIN) {
                     recv_client(es, (TCPClient*) ev_data);
                     tx_upstream_copy(es, (TCPClient*) ev_data); // prep send buff
-                    tx_echo(es, (TCPClient*) ev_data);          // echo to client
+                    /* tx_echo(es, (TCPClient*) ev_data);          // echo to client */
                 }
                 if (events & EPOLLOUT) {
                     send_tcp_client(es, (TCPClient*) ev_data);
