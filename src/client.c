@@ -1,6 +1,6 @@
 #include "client.h"
 #include "event.h"
-#include <stdio.h>
+#include "dbg.h"
 #include <stdlib.h>
 
 TCPClient* tcp_client_init(uint8_t id) {
@@ -9,7 +9,7 @@ TCPClient* tcp_client_init(uint8_t id) {
     client->event.type = DOWNSTREAM_EVENT;
     client->id = id;
 
-    printf("we created a client with id %d\n", id);
+    log_info("we created a client with id %d\n", id);
 
     return client;
 }

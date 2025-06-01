@@ -1,3 +1,4 @@
+#include "dbg.h"
 #include "worker.h"
 #include "client.h"
 #include "event.h"
@@ -48,7 +49,6 @@ void run_worker_process(TCPServer* server) {
                 if (events & EPOLLIN) {
                     recv_client(es, (TCPClient*) ev_data);
                     tx_upstream_copy(es, (TCPClient*) ev_data); // prep send buff
-                    /* tx_echo(es, (TCPClient*) ev_data);          // echo to client */
                 }
                 if (events & EPOLLOUT) {
                     send_tcp_client(es, (TCPClient*) ev_data);
@@ -75,7 +75,7 @@ void run_worker_process(TCPServer* server) {
 static void tx_echo(EventSystem* es, TCPClient* client) {
     // sanity check that client pointer exists
     if (client == NULL) {
-        printf("Client not initialized\n");
+        log_info("Client not initialized");
         return;
     }
 
@@ -94,19 +94,28 @@ static void tx_echo(EventSystem* es, TCPClient* client) {
 static void tx_downstream_copy(EventSystem* es, TCPClient* upstream) {
     // sanity check that downstream pointer exists
     if (upstream->peer == NULL) {
-        printf("End client not initialized\n");
+        log_info("End client not initialized");
         return;
     }
     if (upstream->peer->peer_type != PEER_TYPE_DOWNSTREAM) {
-        printf("Peer is not a client\n");
+        log_info("Peer is not a client");
         return;
     }
     TCPClient* downstream = upstream->peer;
 
+    if (sizeof(downstream->tx_buf) - downstream->tx_len == 0) {
+        // FORCE FLUSH. NOT READY YET
+        es_mod(es, (EventBase*) downstream, EPOLLOUT);
+        return;
+    }
+
     // memcopy from upstream rx to downstream tx
+    downstream->tx_offset = 0;
     downstream->tx_len = upstream->rx_len;
-    downstream->tx_offset = upstream->rx_offset;
     memcpy(downstream->tx_buf, upstream->rx_buf, upstream->rx_len);
+    // should do math but since sizes are same, we can just reset to 0
+    upstream->rx_offset = 0;
+    upstream->rx_len = 0;
 
     if (downstream->tx_offset < downstream->tx_len) {
         es_mod(es, (EventBase*) downstream, EPOLLIN | EPOLLOUT);
@@ -118,18 +127,28 @@ static void tx_downstream_copy(EventSystem* es, TCPClient* upstream) {
 static void tx_upstream_copy(EventSystem* es, TCPClient* downstream) {
     // Sanity check that the upstream pointer exists
     if (downstream->peer == NULL) {
-        printf("Upstream client not initialized\n");
+        log_warn("Upstream client not initialized. Did downstream go away fast?");
         return;
     }
     if (downstream->peer->peer_type != PEER_TYPE_UPSTREAM) {
-        printf("Peer is not a upstream client\n");
+        log_info("Peer is not a upstream client");
         return;
     }
     TCPClient* upstream = downstream->peer;
+
+    if (sizeof(upstream->tx_buf) - upstream->tx_len == 0) {
+        // FORCE FLUSH. NOT READY YET
+        es_mod(es, (EventBase*) upstream, EPOLLOUT);
+        return;
+    }
+
     // memcopy from downstream rx to upstream tx
+    upstream->tx_offset = 0;
     upstream->tx_len = downstream->rx_len;
-    upstream->tx_offset = downstream->rx_offset;
     memcpy(upstream->tx_buf, downstream->rx_buf, downstream->rx_len);
+    // should do math but since sizes are same, we can just reset to 0
+    downstream->rx_offset = 0;
+    downstream->rx_len = 0;
 
     if (upstream->tx_offset < upstream->tx_len) {
         es_mod(es, (EventBase*) upstream, EPOLLIN | EPOLLOUT);
@@ -187,7 +206,7 @@ static void accept_client(EventSystem* es, TCPServer* server) {
     int client_fd = accept(server->event.fd, (struct sockaddr*) &client_addr, &client_addr_size);
     if (client_fd == -1) {
         if (errno != EAGAIN && errno != EWOULDBLOCK) {
-            printf("Failed client accept\n");
+            log_warn("Failed client accept");
         }
     }
     set_non_blocking(client_fd);
@@ -206,30 +225,40 @@ static void accept_client(EventSystem* es, TCPServer* server) {
 static void cleanup_client(EventSystem* es, TCPClient* client) {
     if (client->peer != NULL) {
         // remove from event system
-        printf("Cleaned up Peer %d\n", client->peer->id);
+        log_info("Cleaned up Peer %d", client->peer->id);
         es_del(es, client->peer->event.fd);
         close(client->peer->event.fd);
         free(client->peer);
     }
-    printf("Cleaning up Peer %d\n", client->id);
+    log_info("Cleaning up Peer %d", client->id);
     es_del(es, client->event.fd);
     close(client->event.fd);
     free(client);
 }
 
 static void recv_client(EventSystem* es, TCPClient* client) {
+    ssize_t num_bytes;
+
     while (1) {
-        ssize_t num_bytes = recv(client->event.fd, client->rx_buf, sizeof(client->rx_buf), 0);
+        if (sizeof(client->rx_buf) - client->rx_len == 0) {
+            // Force flush of buffer. mark not ready for IN events
+            es_mod(es, (EventBase*) client, EPOLLOUT);
+            break;
+        }
+
+        num_bytes = recv(client->event.fd, client->rx_buf + client->rx_offset,
+                         sizeof(client->rx_buf) - client->rx_len, 0);
 
         if (num_bytes > 0) {
-            client->rx_len = num_bytes;
-            client->rx_offset = 0;
+            client->rx_len += num_bytes;
+            client->rx_offset += num_bytes;
         } else if (num_bytes == 0) {
             // EOF from client
-            printf("Client %d Disconnected\n", client->id);
+            log_info("Client %d Disconnected", client->id);
             cleanup_client(es, client);
             break;
         } else {
+            // allocated but not ready to read from socket
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
                 break;
             } else {
@@ -250,7 +279,7 @@ static void send_tcp_client(EventSystem* es, TCPClient* client) {
             perror("we failed to send for some reason\n");
             // TODO: more cleanup stuff
         }
-        printf("Sent %ld bytes to client %d\n", n, client->id);
+        log_info("Sent %ld bytes to client %d", n, client->id);
 
         client->tx_offset += n;
     }
