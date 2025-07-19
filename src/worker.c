@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -46,6 +47,12 @@ void run_worker_process(TCPServer* server) {
                 accept_client(es, (TCPServer*) ev_data);
                 break;
             case DOWNSTREAM_EVENT:
+                if (events & EPOLLRDHUP) {
+                    log_info("Client %d Disconnected before we could get to them", ((TCPClient*) ev_data)->id);
+                    cleanup_client(es, (TCPClient*) ev_data);
+                    break;
+                }
+
                 if (events & EPOLLIN) {
                     recv_client(es, (TCPClient*) ev_data);
                     tx_upstream_copy(es, (TCPClient*) ev_data); // prep send buff
