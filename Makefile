@@ -1,15 +1,17 @@
 TARGET = reverse_proxy
 
+BUILD_DIR = build
+SRC_DIR = src
+INCLUDE_DIR = include
+
 CC = gcc
 DEP_FLAGS = -MP -MD
 # C_FLAGS = -std=c11 -Wall -Werror -Wextra -march=native -O2
-C_FLAGS = -std=c11 -Wall -Wextra -march=native -O2
+C_FLAGS = -std=c11 -Wall -Wextra -march=native -O2 -I$(INCLUDE_DIR)
 
-BUILD_DIR = build
-SRC_DIR = src
 
 C_FILES = $(wildcard $(SRC_DIR)/*.c) $(wildcard $(SRC_DIR)/**/*.c)
-H_FILES = $(wildcard $(SRC_DIR)/*.h) $(wildcard $(SRC_DIR)/**/*.h)
+H_FILES = $(wildcard $(SRC_DIR)/*.h) $(wildcard $(INCLUDE_DIR)/**/*.h)
 
 OBJ_FILES = $(patsubst %.c, %.o, $(C_FILES))
 
