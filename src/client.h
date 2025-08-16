@@ -16,11 +16,11 @@ struct TCPClient {
     TCPClient* peer;
 
     uint8_t id;
-    char tx_buf[48];
+    char tx_buf[16];
     size_t tx_len;
     size_t tx_offset;
 
-    char rx_buf[48];
+    char rx_buf[16];
     size_t rx_len;
     size_t rx_offset;
 };

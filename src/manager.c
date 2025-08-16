@@ -2,7 +2,6 @@
 #include "colors.h"
 #include "server.h"
 #include "worker.h"
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/prctl.h>
@@ -19,12 +18,10 @@ Manager* manager_init(uint16_t port) {
 
     manager->server = server;
     manager->manager_pid = getpid();
-    manager->num_workers = 1;
+    manager->num_workers = 3;
 
-    // This DOESNT work right now -- but it would be 
-    // nice to be able to grep for manger vs worker
-    // processes in the terminal without
-    prctl(PR_SET_NAME, "ManagerProcess", 0, 0, 0);
+    // This works strictly for pgrep
+    prctl(PR_SET_NAME, "ProxyManager", 0, 0, 0);
 
     return manager;
 }
@@ -36,7 +33,7 @@ void spawn_workers(Manager* manager) {
             perror("Failed to fork worker process");
             exit(EXIT_FAILURE);
         } else if (pid == 0) {
-            prctl(PR_SET_NAME, "WorkerProcess", 0, 0, 0);
+            prctl(PR_SET_NAME, "ProxyWorker", 0, 0, 0);
             run_worker_process(manager->server);
 
             // maybe worker needs to cleanup master on shutdown?

@@ -40,40 +40,41 @@ void run_worker_process(TCPServer* server) {
 
         for (int i = 0; i < nfds; i++) {
             EventBase* ev_data = (EventBase*) es->events[i].data.ptr;
-            uint32_t events = es->events[i].events; // will use for send vs recv
+            uint32_t events = es->events[i].events;
 
             switch (ev_data->type) {
             case SERVER_EVENT:
                 accept_client(es, (TCPServer*) ev_data);
                 break;
-            case DOWNSTREAM_EVENT:
+            case DOWNSTREAM_EVENT: {
+                TCPClient* client = (TCPClient*) ev_data;
                 if (events & EPOLLRDHUP) {
-                    log_info("Client %d Disconnected before we could get to them", ((TCPClient*) ev_data)->id);
-                    cleanup_client(es, (TCPClient*) ev_data);
-                    break;
+                    log_info("Client %d Disconnected before we could get to them", client->id);
+                    cleanup_client(es, client);
+                    continue;
                 }
-
                 if (events & EPOLLIN) {
-                    recv_client(es, (TCPClient*) ev_data);
-                    tx_upstream_copy(es, (TCPClient*) ev_data); // prep send buff
-                }
-                if (events & EPOLLOUT) {
-                    send_tcp_client(es, (TCPClient*) ev_data);
-                    // Fully flushed, Strictly check rx from downstream
+                    recv_client(es, client);
+                    tx_upstream_copy(es, client); // prep send buff
+                } else if (events & EPOLLOUT) {
+                    send_tcp_client(es, client);
+                    // Fully flushed, strictly check rx from downstream
                     es_mod(es, ev_data, EPOLLIN);
                 }
                 break;
-            case UPSTREAM_EVENT:
+            }
+            case UPSTREAM_EVENT: {
+                TCPClient* client = (TCPClient*) ev_data;
                 if (events & EPOLLIN) {
-                    recv_client(es, (TCPClient*) ev_data);
-                    tx_downstream_copy(es, (TCPClient*) ev_data); // prep send buff
-                }
-                if (events & EPOLLOUT) {
-                    send_tcp_client(es, (TCPClient*) ev_data);
-                    // Fully flushed. Strictly check rx from upstream
+                    recv_client(es, client);
+                    tx_downstream_copy(es, client); // prep send buff
+                } else if (events & EPOLLOUT) {
+                    send_tcp_client(es, client);
+                    // Fully flushed, strictly check rx from upstream
                     es_mod(es, ev_data, EPOLLIN);
                 }
                 break;
+            }
             }
         }
     }
